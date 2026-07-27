@@ -1,0 +1,1340 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MIDI → pitchGuide JSON 変換ツール</title>
+  <style>
+    /* ── リセット・変数 ──────────────────────────────────────────────────── */
+    :root {
+      --bg:       #12131a;
+      --surface:  #1e1f2e;
+      --surface2: #252640;
+      --accent:   #5c7cfa;
+      --green:    #51cf66;
+      --warn:     #ffd43b;
+      --text:     #e8e8f0;
+      --dim:      #7b7c9e;
+      --border:   #2e2f48;
+      --radius:   10px;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      font-size: 15px;
+      line-height: 1.6;
+      padding: 28px 16px 60px;
+    }
+
+    .container { max-width: 820px; margin: 0 auto; }
+
+    /* ── ヘッダー ─────────────────────────────────────────────────────────── */
+    header { margin-bottom: 32px; }
+    header h1 { font-size: 1.4rem; font-weight: 700; margin-bottom: 4px; }
+    header p  { color: var(--dim); font-size: 0.875rem; }
+
+    /* ── セクション共通 ──────────────────────────────────────────────────── */
+    section { margin-bottom: 32px; }
+    h2 {
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--dim);
+      margin-bottom: 12px;
+    }
+
+    /* ── ドロップエリア ──────────────────────────────────────────────────── */
+    #drop-area {
+      border: 2px dashed var(--border);
+      border-radius: var(--radius);
+      padding: 52px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      user-select: none;
+    }
+    #drop-area:hover, #drop-area.drag-over {
+      border-color: var(--accent);
+      background: rgba(92, 124, 250, 0.06);
+    }
+    #drop-area .icon  { font-size: 2.5rem; margin-bottom: 10px; }
+    #drop-area .label { font-size: 1rem; color: var(--text); margin-bottom: 6px; }
+    #drop-area .hint  { font-size: 0.78rem; color: var(--dim); }
+    #midi-input { display: none; }
+
+    /* ── 情報バー ─────────────────────────────────────────────────────────── */
+    .info-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px 24px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 16px;
+      margin-bottom: 16px;
+      font-size: 0.82rem;
+      color: var(--dim);
+    }
+    .info-bar .val { color: var(--text); font-weight: 600; }
+
+    /* ── トラックカード ──────────────────────────────────────────────────── */
+    .track-card {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 13px 16px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .track-card:hover    { border-color: #44456a; background: var(--surface2); }
+    .track-card.selected { border-color: var(--accent); background: rgba(92,124,250,0.08); }
+    .track-card.empty    { opacity: 0.45; pointer-events: none; }
+
+    .track-card .name { flex: 1; font-weight: 500; font-size: 0.95rem; }
+    .track-card .meta { font-size: 0.78rem; color: var(--dim); text-align: right; }
+    .track-card .idx  {
+      font-size: 0.72rem;
+      color: var(--dim);
+      background: var(--surface2);
+      border-radius: 4px;
+      padding: 2px 7px;
+    }
+    .track-card.selected .idx {
+      background: rgba(92,124,250,0.25);
+      color: var(--accent);
+    }
+
+    /* ── ロール選択セレクター ──────────────────────────────────────────────── */
+    .role-select {
+      padding: 6px 10px;
+      font-size: 0.85rem;
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .role-select:focus { outline: none; border-color: var(--accent); }
+    .track-card { flex-wrap: wrap; }
+
+    /* ── ボタン ──────────────────────────────────────────────────────────── */
+    .btn {
+      display: inline-block;
+      border: none;
+      border-radius: 8px;
+      padding: 11px 26px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: filter 0.15s, opacity 0.15s;
+    }
+    .btn:hover:not(:disabled) { filter: brightness(1.15); }
+    .btn:disabled { opacity: 0.38; cursor: not-allowed; }
+    .btn-primary  { background: var(--accent); color: #fff; }
+    .btn-success  { background: #2f9e44; color: #fff; margin-top: 12px; }
+
+    /* ── JSON プレビュー ─────────────────────────────────────────────────── */
+    #json-preview {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      max-height: 420px;
+      overflow-y: auto;
+      font-size: 0.78rem;
+      font-family: 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+      white-space: pre;
+      color: #90d9a0;
+      line-height: 1.55;
+    }
+
+    /* ── エラー ──────────────────────────────────────────────────────────── */
+    .error-box {
+      background: rgba(255, 80, 80, 0.08);
+      border: 1px solid #cc4444;
+      border-radius: var(--radius);
+      color: #ff7070;
+      padding: 12px 16px;
+      font-size: 0.875rem;
+      margin-bottom: 20px;
+    }
+
+    /* ── デバッグパネル ──────────────────────────────────────────────────── */
+    #debug-section {
+      margin-top: 8px;
+    }
+
+    #debug-section details {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    /* <summary> のデフォルトマーカーを非表示にして独自矢印を使う */
+    #debug-section summary {
+      list-style: none;
+      padding: 11px 16px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--dim);
+      user-select: none;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #debug-section summary::-webkit-details-marker { display: none; }
+    #debug-section summary::before {
+      content: '▶';
+      font-size: 0.65rem;
+      transition: transform 0.15s;
+      display: inline-block;
+    }
+    #debug-section details[open] summary::before {
+      transform: rotate(90deg);
+    }
+
+    /* デバッグコンテンツ内のレイアウト */
+    .debug-content {
+      padding: 0 16px 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    /* グローバル情報行 */
+    .debug-global {
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+      font-size: 0.77rem;
+      color: var(--dim);
+      padding: 10px 0 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 20px;
+    }
+    .debug-global .val { color: var(--text); }
+
+    /* テーブル */
+    .debug-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-family: 'Cascadia Code', 'Fira Code', monospace;
+      font-size: 0.73rem;
+    }
+    .debug-table th {
+      text-align: right;
+      color: var(--dim);
+      border-bottom: 1px solid var(--border);
+      padding: 4px 10px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .debug-table th:first-child { text-align: left; }
+    .debug-table td {
+      text-align: right;
+      padding: 5px 10px;
+      border-bottom: 1px solid rgba(46,47,72,0.5);
+      color: var(--text);
+      white-space: nowrap;
+    }
+    .debug-table td:first-child { text-align: left; color: var(--dim); }
+    .debug-table tr:last-child td { border-bottom: none; }
+
+    /* terminalTick と lastNoteEndTick が大きくずれている場合の警告色 */
+    .debug-table .warn { color: var(--warn); }
+
+    /* 末尾ノート詳細テーブル */
+    .debug-sub-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--dim);
+      margin: 18px 0 8px;
+    }
+    .debug-table .track-sep td { border-top: 1px solid var(--border); }
+    .debug-table .late-warn td { color: var(--warn); }
+
+    /* ── ユーティリティ ──────────────────────────────────────────────────── */
+    .hidden { display: none !important; }
+
+    /* ── レスポンシブ (スマホ) ──────────────────────────────────────────── */
+    @media (max-width: 540px) {
+      body { padding: 20px 12px 48px; }
+      .info-bar { gap: 4px 16px; }
+      .debug-table { font-size: 0.68rem; }
+      .debug-table th, .debug-table td { padding: 4px 6px; }
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- ── ヘッダー ──────────────────────────────────────────────────────────── -->
+  <header>
+    <h1>🎼 MIDI → pitchGuide JSON</h1>
+    <p>MIDIファイルをアップロードし、トラックを選択して音程ガイドJSONを生成します。</p>
+  </header>
+
+  <!-- ── エラー表示 ─────────────────────────────────────────────────────────── -->
+  <div id="error-box" class="error-box hidden"></div>
+
+  <!-- ── 1. MIDIアップロードエリア ─────────────────────────────────────────── -->
+  <section>
+    <div id="drop-area">
+      <div class="icon">🎵</div>
+      <div class="label">MIDIファイルをドロップ</div>
+      <div class="hint">またはクリックして選択（.mid / .midi）</div>
+      <input type="file" id="midi-input" accept=".mid,.midi">
+    </div>
+  </section>
+
+  <!-- ── 2. トラック一覧 ─────────────────────────────────────────────────────── -->
+  <section id="track-section" class="hidden">
+    <div class="info-bar" id="midi-info"></div>
+    <h2>トラック一覧 — 役割を割り当ててください</h2>
+    <div id="track-list"></div>
+
+    <!-- ── 前奏時間情報 ── -->
+    <div id="vocal-start-info" style="margin-top:20px; padding:14px; background:var(--surface); border-radius:var(--radius); border-left:3px solid var(--accent); color:var(--text); font-size:0.9rem;">
+      <span id="vocal-start-text" style="display:none;">前奏（待機時間）: <strong id="vocal-start-time">0.00</strong> 秒</span>
+    </div>
+  </section>
+
+  <!-- ── 3. 生成ボタン ──────────────────────────────────────────────────────── -->
+  <section id="generate-section" class="hidden">
+    <!-- 声部同期チェックボックス -->
+    <div style="margin-bottom:16px; display:flex; align-items:center; gap:8px;">
+      <input type="checkbox" id="vocal-sync-checkbox" checked style="width:18px; height:18px; cursor:pointer;">
+      <label for="vocal-sync-checkbox" style="font-size:0.85rem; color:var(--text); cursor:pointer; user-select:none;">
+        ✓ 声部同期（複数の声部を同じ開始時刻に揃える）
+      </label>
+    </div>
+
+    <!-- タイムシフト補正: 全ノートの start/end から指定 tick を引く（トラックオフセット修正用） -->
+    <div style="margin-bottom:12px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <label for="shift-tick-input" style="font-size:0.82rem; color:var(--dim); white-space:nowrap;">
+        タイムシフト補正（tick）:
+      </label>
+      <input type="number" id="shift-tick-input" min="0" step="480"
+        placeholder="未設定（補正なし）"
+        style="width:210px; padding:6px 10px; background:var(--surface2); border:1px solid var(--border);
+               border-radius:6px; color:var(--text); font-size:0.85rem;">
+      <span id="shift-hint" style="font-size:0.75rem; color:var(--warn);"></span>
+    </div>
+
+    <!-- カットオフtick: 指定tick以降に始まるノートを除外（DAW編集ミス対策） -->
+    <div style="margin-bottom:16px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <label for="cutoff-tick-input" style="font-size:0.82rem; color:var(--dim); white-space:nowrap;">
+        ノート除外（startTick ≥ ）:
+      </label>
+      <input type="number" id="cutoff-tick-input" min="0" step="480"
+        placeholder="未設定（全ノート使用）"
+        style="width:210px; padding:6px 10px; background:var(--surface2); border:1px solid var(--border);
+               border-radius:6px; color:var(--text); font-size:0.85rem;">
+      <span id="cutoff-hint" style="font-size:0.75rem; color:var(--warn);"></span>
+    </div>
+    <button class="btn btn-primary" id="generate-btn" disabled>pitchGuide 生成</button>
+    <p style="margin-top:8px; font-size:0.78rem; color:var(--dim)">
+      ノートが1つ以上あるトラックを選択してください
+    </p>
+  </section>
+
+  <!-- ── 4. JSONプレビュー & ダウンロード ───────────────────────────────────── -->
+  <section id="output-section" class="hidden">
+    <h2>JSON プレビュー</h2>
+    <pre id="json-preview"></pre>
+    <button class="btn btn-success" id="download-btn">⬇ JSON ダウンロード</button>
+  </section>
+
+  <!-- ── 5. デバッグパネル (折りたたみ式・初期状態は閉じる) ────────────────── -->
+  <section id="debug-section" class="hidden">
+    <details id="debug-details">
+      <!-- open 属性なし → 初期状態は閉じる -->
+      <summary>デバッグ情報</summary>
+      <div class="debug-content">
+
+        <!-- グローバル情報（TPQ・テンポ） -->
+        <div class="debug-global" id="debug-global"></div>
+
+        <!--
+          各トラックのティック・秒計算内部値テーブル
+          列:
+            Track         … インデックスと名前
+            rawNotes      … パース後の生ノート数
+            terminalTick  … whileループ終了時の絶対tick（end-of-track deltaを含む）
+            lastNoteEndTick … rawNotesのendTick最大値（実際の最終音符終了tick）
+            durationTick  … duration計算に使ったtick（= lastNoteEndTick）
+            durationSec   … durationTickを秒変換した値
+        -->
+        <table class="debug-table">
+          <thead>
+            <tr>
+              <th>Track</th>
+              <th>rawNotes</th>
+              <th>terminalTick</th>
+              <th>lastNoteEndTick</th>
+              <th>durationTick</th>
+              <th>durationSec</th>
+            </tr>
+          </thead>
+          <tbody id="debug-tbody"></tbody>
+        </table>
+
+        <!-- 先頭デルタタイム診断（ファイル vs パーサーの切り分け用） -->
+        <p class="debug-sub-title">先頭デルタタイム診断（ファイル内の生データ）</p>
+        <table class="debug-table">
+          <thead>
+            <tr>
+              <th>Track</th>
+              <th>先頭ΔT (tick)</th>
+              <th>生バイト (hex)</th>
+            </tr>
+          </thead>
+          <tbody id="debug-delta-tbody"></tbody>
+        </table>
+
+        <!-- 先頭ノート詳細 (startTick 昇順 上位3件 / トラック) -->
+        <p class="debug-sub-title">先頭ノート詳細（startTick 昇順 上位3件 / トラック）</p>
+        <table class="debug-table">
+          <thead>
+            <tr>
+              <th>Track</th>
+              <th>Pitch</th>
+              <th>MIDI#</th>
+              <th>startTick</th>
+              <th>endTick</th>
+              <th>durationTick</th>
+            </tr>
+          </thead>
+          <tbody id="debug-first-tbody"></tbody>
+        </table>
+
+        <!-- 末尾ノート詳細 (endTick 降順 上位5件 / トラック) -->
+        <p class="debug-sub-title">末尾ノート詳細（endTick 降順 上位5件 / トラック）</p>
+        <table class="debug-table">
+          <thead>
+            <tr>
+              <th>Track</th>
+              <th>Pitch</th>
+              <th>MIDI#</th>
+              <th>startTick</th>
+              <th>endTick</th>
+              <th>durationTick</th>
+            </tr>
+          </thead>
+          <tbody id="debug-late-tbody"></tbody>
+        </table>
+
+      </div>
+    </details>
+  </section>
+
+</div>
+
+<script>
+// =============================================================================
+// MIDI パーサー
+// MIDIファイル仕様に基づくネイティブ実装（CDN不要）
+// 対応: Format 0 / 1、ランニングステータス、Note On (velocity=0) = Note Off、
+//       CC 120 (All Sound Off) / CC 123 (All Notes Off)
+// 非対応: SMPTEタイムコード、テンポ変化（単一BPM前提）
+// =============================================================================
+
+class MidiParser {
+  /**
+   * @param {ArrayBuffer} buffer
+   */
+  constructor(buffer) {
+    this.bytes        = new Uint8Array(buffer);
+    this.view         = new DataView(buffer);
+    this.pos          = 0;
+    this.format       = 0;
+    this.ticksPerBeat = 480;  // デフォルト、ヘッダーで上書き
+    this.bpm          = 120;  // デフォルト、最初のテンポイベントで上書き
+    this.tempoUs      = 500000; // デフォルト 120BPM = 500000μs/拍
+    this._tempoFound  = false;  // 最初のテンポイベントのみ採用するフラグ
+    this.tracks       = [];
+    this._parse();
+  }
+
+  // ── バイト読み取りヘルパー ─────────────────────────────────────────────────
+  _byte() { return this.bytes[this.pos++]; }
+  _u16()  { const v = this.view.getUint16(this.pos);  this.pos += 2; return v; }
+  _u32()  { const v = this.view.getUint32(this.pos);  this.pos += 4; return v; }
+
+  _str(n) {
+    let s = '';
+    for (let i = 0; i < n; i++) s += String.fromCharCode(this.bytes[this.pos++]);
+    return s;
+  }
+
+  // Variable-Length Quantity (VLQ) 読み取り
+  _vlq() {
+    let v = 0, b;
+    do { b = this._byte(); v = (v << 7) | (b & 0x7F); } while (b & 0x80);
+    return v;
+  }
+
+  // ── MIDIヘッダー (MThd) 解析 ──────────────────────────────────────────────
+  _parseHeader() {
+    const id = String.fromCharCode(
+      this.bytes[this.pos],
+      this.bytes[this.pos + 1],
+      this.bytes[this.pos + 2],
+      this.bytes[this.pos + 3]
+    );
+    if (id !== 'MThd') throw new Error('MIDI header not found');
+
+    this.pos += 4;
+
+    const headerLength = this.view.getUint32(this.pos);
+    this.pos += 4;
+
+    this.format = this.view.getUint16(this.pos);
+    this.pos += 2;
+
+    const numTracks = this.view.getUint16(this.pos);
+    this.pos += 2;
+
+    this.ticksPerBeat = this.view.getUint16(this.pos);
+    this.pos += 2;
+
+    // headerLength が標準の 6 以外（拡張ヘッダー）でも安全にスキップ
+    this.pos += (headerLength - 6);
+
+    return numTracks;
+  }
+
+  // ── トラックチャンク (MTrk) 解析 ──────────────────────────────────────────
+  _parseTrack(trackIdx = -1) {
+    const tagStart = this.pos;
+    const tag = this._str(4);
+    if (tag !== 'MTrk') throw new Error('MTrk チャンクが見つかりません');
+
+    // ★ this.pos + this._u32() と書くと JavaScript が左辺を先に評価するため
+    //    _u32() 呼び出し前の pos 値で固定され 4 バイトずれる。
+    //    先に _u32() を呼んで pos を進めてから加算する。
+    const chunkLen = this._u32();
+    const chunkEnd = this.pos + chunkLen; // トラックデータ終端位置
+
+    // ── デバッグ出力 ──
+    console.log(`[MIDI Parser Debug] Track ${trackIdx}: tagStart=${tagStart}, chunkLen=${chunkLen}, chunkEnd=${chunkEnd}`);
+
+    // トラックデータ先頭の生バイトを保存（先頭デルタタイム診断用）
+    const dataStart = this.pos;
+    const previewEnd = Math.min(dataStart + 24, chunkEnd);
+
+    const track = {
+      name:     '',
+      rawNotes: [],
+      // ── デバッグ用フィールド ──────────────────────────────────────────────
+      terminalTick:    0,
+      lastNoteEndTick: 0,
+      // 先頭デルタタイム診断
+      firstBytesArr: Array.from(this.bytes.slice(dataStart, previewEnd)),
+    };
+
+    let tick            = 0;  // 現在の絶対ティック
+    let running         = 0;  // ランニングステータス
+    const open          = {}; // 押鍵中ノート: { midiNote -> { startTick, velocity } }
+    let lastNoteOffTick = 0;  // 最後に確定したNoteOffのtick（残留ノートの補正用）
+
+    while (this.pos < chunkEnd) {
+
+      // ── デルタタイム (VLQ) ─────────────────────────────────────────────────
+      const posBeforeDelta = this.pos;
+      tick += this._vlq();
+
+      // ★ デバッグ: 最初の 30 イベントのみ出力
+      if (trackIdx === 1 && track.rawNotes.length + (Object.keys(open).length > 0 ? 1 : 0) < 1) {
+        console.log(`  Event @pos=${posBeforeDelta} tick=${tick}:`, this.bytes[this.pos].toString(16).padStart(2, '0').toUpperCase());
+      }
+
+      // ── ステータスバイト (ランニングステータス対応) ──────────────────────────
+      const peek = this.bytes[this.pos];
+      let status;
+      if (peek & 0x80) {
+        // 高ビット 1 → 明示的なステータスバイト
+        status  = peek;
+        this.pos++;
+        // SysEx / meta はランニングステータスを更新しない（MIDI 仕様）
+        if (peek !== 0xF0 && peek !== 0xF7 && peek !== 0xFF) {
+          running = peek;
+        }
+      } else {
+        // 高ビット 0 → ランニングステータスを継続（pos は進めない）
+        status = running;
+      }
+
+      const type = status & 0xF0; // 上位ニブル = イベント種別
+
+      // ── イベント種別ごとの処理 ──────────────────────────────────────────────
+
+      if (status === 0xFF) {
+        // ── メタイベント ───────────────────────────────────────────────────
+        const meta    = this._byte();
+        const metaLen = this._vlq();
+        const metaEnd = this.pos + metaLen;
+        const mb      = this.bytes.slice(this.pos, metaEnd);
+        this.pos      = metaEnd;
+
+        switch (meta) {
+          case 0x51: {
+            // テンポ設定（3バイト: マイクロ秒/拍）
+            // 単一BPM前提のため最初のテンポイベントのみ採用する
+            if (!this._tempoFound) {
+              const us      = (mb[0] << 16) | (mb[1] << 8) | mb[2];
+              this.tempoUs  = us;
+              this.bpm      = Math.round(60_000_000 / us * 100) / 100;
+              this._tempoFound = true;
+            }
+            break;
+          }
+          case 0x03: {
+            // トラック名（UTF-8 → フォールバック Latin-1）
+            try {
+              track.name = new TextDecoder('utf-8').decode(mb);
+            } catch {
+              track.name = Array.from(mb).map(b => String.fromCharCode(b)).join('');
+            }
+            break;
+          }
+          // 0x2F (End of Track) 等は無視
+        }
+
+      } else if (status === 0xF0 || status === 0xF7) {
+        // ── SysEx（スキップ）────────────────────────────────────────────────
+        this.pos += this._vlq();
+
+      } else if (type === 0x90) {
+        // ── Note On ────────────────────────────────────────────────────────
+        const note = this._byte();
+        const vel  = this._byte();
+        if (vel > 0) {
+          // 押鍵開始を記録
+          open[note] = { startTick: tick, velocity: vel };
+        } else {
+          // velocity=0 のノートオン = ノートオフ（よく使われる省略形）
+          if (open[note] != null) {
+            track.rawNotes.push({ midi: note, startTick: open[note].startTick, endTick: tick });
+            lastNoteOffTick = Math.max(lastNoteOffTick, tick);
+            delete open[note];
+          }
+        }
+
+      } else if (type === 0x80) {
+        // ── Note Off ───────────────────────────────────────────────────────
+        const note = this._byte();
+        this._byte(); // velocity（離鍵速度）は不使用
+        if (open[note] != null) {
+          track.rawNotes.push({ midi: note, startTick: open[note].startTick, endTick: tick });
+          lastNoteOffTick = Math.max(lastNoteOffTick, tick);
+          delete open[note];
+        }
+
+      } else if (type === 0xC0) {
+        // ── Program Change ─────────────────────────────────────────────────
+        this._byte(); // プログラム番号（不使用）
+
+      } else if (type === 0xD0) {
+        // ── Channel Pressure ───────────────────────────────────────────────
+        this._byte(); // プレッシャー値（不使用）
+
+      } else if (type === 0xE0) {
+        // ── Pitch Bend ─────────────────────────────────────────────────────
+        this._byte(); // LSB
+        this._byte(); // MSB
+
+      } else if (type === 0xB0) {
+        // ── Control Change ─────────────────────────────────────────────────
+        const cc  = this._byte();
+        const val = this._byte(); // コントロール値（以下の特殊CCを除き不使用）
+
+        if (cc === 120 || cc === 123) {
+          // CC 120: All Sound Off
+          // CC 123: All Notes Off
+          // → 個別 Note Off を送らずに全音を止めるDAW出力で発生する。
+          //   open にある全ノートをこの tick でクローズする。
+          for (const [n, info] of Object.entries(open)) {
+            track.rawNotes.push({ midi: +n, startTick: info.startTick, endTick: tick });
+            lastNoteOffTick = Math.max(lastNoteOffTick, tick);
+          }
+          for (const k of Object.keys(open)) delete open[k];
+        }
+
+      } else {
+        // ── その他 MIDI イベント（PC / Aftertouch / PitchBend）──────────────
+        // データバイト数: 0xC0=1, 0xD0=1, それ以外（0xA0, 0xE0 等）=2
+        this.pos += (type === 0xC0 || type === 0xD0) ? 1 : 2;
+      }
+    }
+
+    // ── 残留ノートの処理 ────────────────────────────────────────────────────
+    // NoteOff が来なかったノートを lastNoteOffTick でクローズする。
+    // end-of-track メタイベント前の大きな delta tick を誤って使わないための補正。
+    // lastNoteOffTick が 0（ノートオフが1つもなかった）場合は startTick で0秒ノートとする。
+    for (const [noteStr, info] of Object.entries(open)) {
+      const endTick = lastNoteOffTick > info.startTick ? lastNoteOffTick : info.startTick;
+      track.rawNotes.push({ midi: +noteStr, startTick: info.startTick, endTick });
+    }
+
+    // startTick 昇順でソート
+    track.rawNotes.sort((a, b) => a.startTick - b.startTick);
+
+    // ── デバッグ用値を記録 ───────────────────────────────────────────────────
+    // terminalTick: whileループ終了時の tick。end-of-track 前に大きな delta がある
+    //               ファイルではここが正確な曲の長さより大きくなることがある。
+    track.terminalTick    = tick;
+    // lastNoteEndTick: 実際に確定したノートの最大 endTick（duration 計算に使う値）
+    track.lastNoteEndTick = track.rawNotes.length > 0
+      ? Math.max(...track.rawNotes.map(n => n.endTick))
+      : 0;
+
+    // ── デバッグ出力：最初のノート開始時刻 ──
+    if (track.rawNotes.length > 0) {
+      const firstNote = track.rawNotes[0];
+      const firstNoteSec = this._toSec(firstNote.startTick);
+      console.log(`[MIDI Parser Debug] Track ${trackIdx}: firstNote tick=${firstNote.startTick} (${firstNoteSec.toFixed(3)}s), notes.length=${track.rawNotes.length}`);
+    } else {
+      console.log(`[MIDI Parser Debug] Track ${trackIdx}: no notes`);
+    }
+
+    // 安全のためチャンク終端に位置を合わせる
+    this.pos = chunkEnd;
+    return track;
+  }
+
+  // ── メインパース ────────────────────────────────────────────────────────────
+  _parse() {
+    this._parseHeader();
+
+    while (this.pos < this.bytes.length) {
+      // チャンクヘッダー最低 8 バイト（タグ 4 + 長さ 4）が必要
+      if (this.pos + 8 > this.bytes.length) break;
+
+      const tag = String.fromCharCode(
+        this.bytes[this.pos],
+        this.bytes[this.pos + 1],
+        this.bytes[this.pos + 2],
+        this.bytes[this.pos + 3]
+      );
+
+      if (tag === 'MTrk') {
+        // 通常のトラックチャンクを解析
+        this.tracks.push(this._parseTrack(this.tracks.length));
+      } else {
+        // MTrk 以外の未知チャンク（DAW 独自チャンク等）をスキップ。
+        // break ではなく読み飛ばして次の MTrk を探し続ける。
+        this.pos += 4; // タグをスキップ
+        const unknownLen = this.view.getUint32(this.pos);
+        this.pos += 4 + unknownLen; // 長さフィールド(4) + データ本体をスキップ
+      }
+    }
+  }
+
+  // ── Tick → 秒 変換（単一 BPM 前提）────────────────────────────────────────
+  _toSec(ticks) {
+    // 拍数 = ticks / ticksPerBeat
+    // 秒数 = 拍数 × (60 / BPM)
+    return (ticks / this.ticksPerBeat) * (60 / this.bpm);
+  }
+
+  // ── 秒単位の全トラックデータを返す ────────────────────────────────────────
+  getTracksData() {
+    return this.tracks.map((track, index) => {
+
+      // 各ノートを秒単位に変換
+      const notes = track.rawNotes.map(n => ({
+        midi:     n.midi,
+        time:     this._toSec(n.startTick),              // 開始秒
+        endTime:  this._toSec(n.endTick),                // 終了秒
+        duration: this._toSec(n.endTick - n.startTick)  // 音長（秒）
+      }));
+
+      // ③ duration 計算の見直し:
+      //    トラック終端 tick（end-of-track delta を含む可能性）ではなく、
+      //    「最後のノートの endTick」を基準に計算する。
+      //    これにより end-of-track 前の大きな空白 delta に引きずられない。
+      const durationTick = track.lastNoteEndTick; // rawNotes の endTick 最大値
+      const totalDuration = this._toSec(durationTick);
+
+      return {
+        index,
+        name:      track.name.trim() || `Track ${index}`,
+        notes,
+        noteCount: notes.length,
+        duration:  totalDuration,
+      };
+    });
+  }
+}
+
+// =============================================================================
+// pitchGuide JSON 生成
+// 仕様:
+//   - 同時発音 → 最高音のみ採用（開始時刻差 < 5ms を「同時」と判定）
+//   - 重複区間 → 前のノートを次の開始時刻まで切り詰め
+//   - 隙間     → midi:null の休符区間で補完
+//   - 小数点第3位まで丸め
+// =============================================================================
+
+const r3 = (n) => Math.round(n * 1000) / 1000; // 小数点第3位丸め
+
+/**
+ * @param {{name:string, notes:Array}} trackData - getTracksData() の各要素
+ * @param {number|null} cutoffTick  - この tick 以降に startTick があるノートを除外 (null = 除外なし)
+ * @param {number}      shiftSec    - 全ノートの time/endTime からこの秒数を引く (0 = 補正なし)
+ * @returns {{part:string, notes:Array}}
+ */
+function generatePitchGuide(trackData, cutoffTick = null, shiftSec = 0) {
+  const { name } = trackData;
+  const cutoffSec = (cutoffTick != null && parser) ? parser._toSec(cutoffTick) : Infinity;
+  // まずカットオフでフィルタ → 次にシフト補正を適用
+  const notes = trackData.notes
+    .filter(n => n.time < cutoffSec)
+    .map(n => shiftSec > 0
+      ? { ...n, time: Math.max(0, r3(n.time - shiftSec)), endTime: Math.max(0, r3(n.endTime - shiftSec)) }
+      : n
+    );
+  if (notes.length === 0) return { part: name, notes: [] };
+
+  const SIMUL_THRESH = 0.005; // 5ms: この差以内を「同時発音」と判定
+
+  // ── STEP 1: 同時発音の除去（最高音を採用）────────────────────────────────
+  const sorted = [...notes].sort((a, b) => a.time - b.time);
+  const deduped = [];
+  let i = 0;
+  while (i < sorted.length) {
+    let best = sorted[i];
+    let j = i + 1;
+    // 同じ開始時刻のノートをすべて確認して最高音を選ぶ
+    while (j < sorted.length && Math.abs(sorted[j].time - best.time) < SIMUL_THRESH) {
+      if (sorted[j].midi > best.midi) best = sorted[j];
+      j++;
+    }
+    deduped.push(best);
+    i = j;
+  }
+
+  // ── STEP 2: 重複区間の除去──────────────────────────────────────────────────
+  // 前のノートが次のノートの開始を超えていたら切り詰める
+  const cleaned = [];
+  for (let k = 0; k < deduped.length; k++) {
+    const note  = deduped[k];
+    const next  = deduped[k + 1];
+    const start = r3(note.time);
+    let   end   = r3(note.endTime);
+
+    if (next && r3(next.time) < end) {
+      end = r3(next.time); // 次の開始まで切り詰め
+    }
+
+    if (end > start) {
+      cleaned.push({ start, end, midi: note.midi });
+    }
+  }
+
+  // ── STEP 3: 休符（midi:null）で隙間を補完────────────────────────────────
+  const result = [];
+
+  // 先頭の休符（曲開始〜最初のノート）
+  if (cleaned.length > 0 && cleaned[0].start > 0.001) {
+    result.push({ start: 0.0, end: cleaned[0].start, midi: null });
+  }
+
+  for (let k = 0; k < cleaned.length; k++) {
+    result.push(cleaned[k]);
+
+    if (k < cleaned.length - 1) {
+      const gap = r3(cleaned[k + 1].start - cleaned[k].end);
+      if (gap > 0.001) {
+        // ノート間の隙間を休符で埋める
+        result.push({ start: cleaned[k].end, end: cleaned[k + 1].start, midi: null });
+      }
+    }
+  }
+
+  return { part: name, notes: result };
+}
+
+// =============================================================================
+// アプリ状態
+// =============================================================================
+
+let parser     = null;  // MidiParser インスタンス
+let tracks     = [];    // getTracksData() の結果
+let selIdx     = -1;    // 選択中トラックインデックス（互換性のため保持）
+let trackRoles = {};    // トラック役割割り当て { trackIdx: 'soprano' | 'alto' | 'piano' | 'none' }
+let jsonObj = null;  // 生成済み JSON
+
+// ── DOM 参照 ─────────────────────────────────────────────────────────────────
+const dropArea      = document.getElementById('drop-area');
+const midiInput     = document.getElementById('midi-input');
+const errorBox      = document.getElementById('error-box');
+const trackSection  = document.getElementById('track-section');
+const midiInfo      = document.getElementById('midi-info');
+const trackList     = document.getElementById('track-list');
+const generateSec   = document.getElementById('generate-section');
+const generateBtn   = document.getElementById('generate-btn');
+const outputSec     = document.getElementById('output-section');
+const jsonPreview   = document.getElementById('json-preview');
+const downloadBtn   = document.getElementById('download-btn');
+const debugSection  = document.getElementById('debug-section');
+const debugDetails  = document.getElementById('debug-details');
+const debugGlobal   = document.getElementById('debug-global');
+const debugTbody    = document.getElementById('debug-tbody');
+const cutoffInput   = document.getElementById('cutoff-tick-input');
+const cutoffHint    = document.getElementById('cutoff-hint');
+const shiftInput    = document.getElementById('shift-tick-input');
+const shiftHint     = document.getElementById('shift-hint');
+
+// ── ユーティリティ ────────────────────────────────────────────────────────────
+const showError = (msg) => {
+  errorBox.textContent = '⚠ ' + msg;
+  errorBox.classList.remove('hidden');
+};
+const hideError = () => {
+  errorBox.classList.add('hidden');
+  errorBox.textContent = '';
+};
+
+/** 秒を mm:ss 形式に変換 */
+const fmt = (sec) => {
+  const s = Math.max(0, sec);
+  return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+};
+
+/** XSS 対策用 HTML エスケープ */
+const esc = (s) => s
+  .replace(/&/g, '&amp;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;');
+
+/** 数値をカンマ区切り文字列に（tick の桁数が多い場合の可読性向上） */
+const fmtNum = (n) => n.toLocaleString('ja-JP');
+
+/**
+ * バイト列の先頭から VLQ を1つデコードして返す
+ * @returns {{ value: number, hex: string }} value=デコード値, hex=使用バイトの16進表記
+ */
+function decodeFirstVLQ(bytesArr) {
+  let value = 0;
+  let count = 0;
+  for (const b of bytesArr) {
+    count++;
+    value = (value << 7) | (b & 0x7F);
+    if (!(b & 0x80)) break;
+  }
+  const hex = bytesArr.slice(0, count)
+    .map(b => b.toString(16).padStart(2, '0').toUpperCase())
+    .join(' ');
+  return { value, hex };
+}
+
+/** MIDI ノート番号 → 音名（例: 60 → C4） */
+const midiToName = (midi) => {
+  const names = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  return names[midi % 12] + (Math.floor(midi / 12) - 1);
+};
+
+// ── MIDIファイル読み込み ──────────────────────────────────────────────────────
+function loadFile(file) {
+  hideError();
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      parser  = new MidiParser(e.target.result);
+      tracks  = parser.getTracksData();
+      selIdx  = -1;
+      jsonObj = null;
+
+      renderTracks();
+      renderDebug();  // デバッグパネルを更新
+
+      // カットオフ自動提案: 外れ値トラックが検出された場合のみ入力欄に値を設定
+      const suggested = detectOutlierCutoff();
+      if (suggested != null) {
+        cutoffInput.value = suggested;
+        cutoffHint.textContent =
+          `⚠ 末尾に孤立ノートの疑い → ${fmtNum(suggested)} tick を自動設定しました`;
+      } else {
+        cutoffInput.value = '';
+        cutoffHint.textContent = '';
+      }
+
+      // タイムシフト自動提案: 先頭ノートの startTick を比較してオフセットを検出
+      // （先頭デルタは常に 0 のケースがあるため、rawNotes の最小 startTick で判定する）
+      // 自動シフト検出は削除（トラック役割割り当てに変更）
+      shiftInput.value = '';
+      shiftHint.textContent = '';
+
+      trackSection.classList.remove('hidden');
+      generateSec.classList.remove('hidden');
+      outputSec.classList.add('hidden');
+      generateBtn.disabled = true;
+    } catch (err) {
+      showError(err.message);
+      console.error(err);
+    }
+  };
+  reader.onerror = () => showError('ファイルの読み込みに失敗しました');
+  reader.readAsArrayBuffer(file);
+}
+
+// ── トラック一覧レンダリング ──────────────────────────────────────────────────
+function renderTracks() {
+  // 情報バー
+  const totalDur   = Math.max(...tracks.map(t => t.duration), 0);
+  const withNotes  = tracks.filter(t => t.noteCount > 0).length;
+
+  midiInfo.innerHTML = `
+    <span>フォーマット: <span class="val">Type ${parser.format}</span></span>
+    <span>BPM: <span class="val">${parser.bpm}</span></span>
+    <span>分解能: <span class="val">${parser.ticksPerBeat} tpqn</span></span>
+    <span>総再生時間: <span class="val">${fmt(totalDur)}</span></span>
+    <span>トラック: <span class="val">${tracks.length}</span>（ノートあり ${withNotes}）</span>
+  `;
+
+  // トラックカード + ロール割り当てセレクター
+  trackList.innerHTML = '';
+  tracks.forEach((track, idx) => {
+    const card = document.createElement('div');
+    card.className = 'track-card' + (track.noteCount === 0 ? ' empty' : '');
+    card.dataset.idx = idx;
+
+    const roleSelect = document.createElement('select');
+    roleSelect.className = 'role-select';
+    roleSelect.dataset.trackIdx = idx;
+    roleSelect.innerHTML = `
+      <option value="none">— なし</option>
+      <option value="soprano">🎤 ソプラノ</option>
+      <option value="alto">🎤 アルト</option>
+      <option value="piano">🎹 ピアノ</option>
+    `;
+    roleSelect.value = trackRoles[idx] || 'none';
+    roleSelect.addEventListener('change', (e) => {
+      trackRoles[idx] = e.target.value;
+      updateVocalStartInfo();
+    });
+
+    const content = document.createElement('div');
+    content.style.flex = '1';
+    content.innerHTML = `
+      <div class="name">${esc(track.name)}</div>
+      <div class="meta">
+        <div>${track.noteCount.toLocaleString()} ノート</div>
+        <div>${fmt(track.duration)}</div>
+      </div>
+    `;
+
+    card.appendChild(content);
+    card.appendChild(roleSelect);
+    card.appendChild(document.createElement('div'));  // .idx のプレースホルダ
+    card.lastChild.className = 'idx';
+    card.lastChild.textContent = `Track ${idx}`;
+
+    trackList.appendChild(card);
+  });
+
+  updateVocalStartInfo();
+}
+
+// ── デバッグパネルのレンダリング ─────────────────────────────────────────────
+function renderDebug() {
+  // ④ グローバル情報: TPQ とテンポ
+  debugGlobal.innerHTML = `
+    <span>TPQ (ticksPerBeat): <span class="val">${parser.ticksPerBeat}</span></span>
+    <span>テンポ: <span class="val">${parser.tempoUs.toLocaleString()} μs/拍</span></span>
+    <span>BPM: <span class="val">${parser.bpm}</span></span>
+    <span>テンポイベント検出: <span class="val">${parser._tempoFound ? 'あり' : 'なし（デフォルト 120BPM）'}</span></span>
+    <span>ファイルサイズ: <span class="val">${(parser.bytes.length / 1024).toFixed(1)} KB</span></span>
+  `;
+
+  // ① 各トラックの内部値テーブル
+  debugTbody.innerHTML = '';
+
+  parser.tracks.forEach((rawTrack, idx) => {
+    // ③ duration 計算に使う tick は lastNoteEndTick
+    const durationTick = rawTrack.lastNoteEndTick;
+    const durationSec  = parser._toSec(durationTick);
+
+    // terminalTick と lastNoteEndTick の差が大きい場合は警告色で表示
+    // 「大きい」の閾値: 1拍分（= ticksPerBeat）以上のずれ
+    const tickDiff     = rawTrack.terminalTick - rawTrack.lastNoteEndTick;
+    const isLargeGap   = tickDiff > parser.ticksPerBeat;
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>Track ${idx} — ${esc(rawTrack.name.trim() || '(無名)')}</td>
+      <td>${fmtNum(rawTrack.rawNotes.length)}</td>
+      <td class="${isLargeGap ? 'warn' : ''}">${fmtNum(rawTrack.terminalTick)}</td>
+      <td>${fmtNum(rawTrack.lastNoteEndTick)}</td>
+      <td>${fmtNum(durationTick)}</td>
+      <td>${fmt(durationSec)}</td>
+    `;
+    debugTbody.appendChild(tr);
+  });
+
+  // ② 先頭デルタタイム診断テーブル
+  // ファイル内の生バイトから最初の VLQ を直接デコード → パーサーバグ vs ファイル起因を切り分ける
+  const deltaTbody = document.getElementById('debug-delta-tbody');
+  deltaTbody.innerHTML = '';
+
+  // 全トラック中で最小の先頭デルタを基準にして、外れ値に警告色を付ける
+  const firstDeltas = parser.tracks.map(t => decodeFirstVLQ(t.firstBytesArr).value);
+  const minFirstDelta = Math.min(...firstDeltas.filter(v => v < Infinity));
+
+  parser.tracks.forEach((rawTrack, idx) => {
+    const { value, hex } = decodeFirstVLQ(rawTrack.firstBytesArr);
+    const isOutlier = value > minFirstDelta + parser.ticksPerBeat;
+    const tr = document.createElement('tr');
+    if (isOutlier) tr.classList.add('late-warn');
+    tr.innerHTML = `
+      <td>Track ${idx}</td>
+      <td>${fmtNum(value)}</td>
+      <td style="font-family:monospace; font-size:0.78rem;">${esc(hex)}</td>
+    `;
+    deltaTbody.appendChild(tr);
+  });
+
+  // ③ 先頭ノート詳細テーブル（startTick 昇順 上位3件 / トラック）
+  const firstTbody = document.getElementById('debug-first-tbody');
+  firstTbody.innerHTML = '';
+
+  parser.tracks.forEach((rawTrack, idx) => {
+    if (rawTrack.rawNotes.length === 0) return;
+    const first3 = [...rawTrack.rawNotes]
+      .sort((a, b) => a.startTick - b.startTick)
+      .slice(0, 3);
+    first3.forEach((note, i) => {
+      const tr = document.createElement('tr');
+      if (i === 0) tr.classList.add('track-sep');
+      tr.innerHTML = `
+        <td>${i === 0 ? `Track ${idx}` : ''}</td>
+        <td>${esc(midiToName(note.midi))}</td>
+        <td>${note.midi}</td>
+        <td>${fmtNum(note.startTick)}</td>
+        <td>${fmtNum(note.endTick)}</td>
+        <td>${fmtNum(note.endTick - note.startTick)}</td>
+      `;
+      firstTbody.appendChild(tr);
+    });
+  });
+
+  // ③ 末尾ノート詳細テーブル（endTick 降順 上位5件 / トラック）
+  const lateTbody = document.getElementById('debug-late-tbody');
+  lateTbody.innerHTML = '';
+
+  // Track 1 の lastNoteEndTick を基準に「外れ値」判定
+  // 最も多くノートを持つトラックの最大 endTick を参照値とする
+  const refEndTick = Math.max(
+    ...parser.tracks.map(t => t.rawNotes.length > 0
+      ? Math.max(...t.rawNotes.map(n => n.endTick)) : 0)
+  );
+  // 外れ値閾値: 他トラック最大 endTick の 105% 以上を異常とみなす
+  const outlierThreshold = refEndTick;
+
+  parser.tracks.forEach((rawTrack, idx) => {
+    if (rawTrack.rawNotes.length === 0) return;
+
+    // endTick 降順でソート → 上位5件
+    const top5 = [...rawTrack.rawNotes]
+      .sort((a, b) => b.endTick - a.endTick)
+      .slice(0, 5);
+
+    top5.forEach((note, i) => {
+      const tr = document.createElement('tr');
+      if (i === 0) tr.classList.add('track-sep');
+      // このノートが他トラックより際立って遅い endTick なら警告色
+      const isOutlier = note.endTick > outlierThreshold * 1.05 ||
+        (note.endTick > rawTrack.rawNotes
+          .filter(n => n !== note)
+          .reduce((m, n) => Math.max(m, n.endTick), 0) * 1.2);
+      if (isOutlier) tr.classList.add('late-warn');
+      tr.innerHTML = `
+        <td>${i === 0 ? `Track ${idx}` : ''}</td>
+        <td>${esc(midiToName(note.midi))}</td>
+        <td>${note.midi}</td>
+        <td>${fmtNum(note.startTick)}</td>
+        <td>${fmtNum(note.endTick)}</td>
+        <td>${fmtNum(note.endTick - note.startTick)}</td>
+      `;
+      lateTbody.appendChild(tr);
+    });
+  });
+
+  // 初回読み込み時にパネルを表示（中身は閉じたまま）
+  debugSection.classList.remove('hidden');
+  // 読み込みのたびに <details> を閉じてリセット
+  debugDetails.removeAttribute('open');
+}
+
+// ── 前奏時間（声部開始時刻）を計算・表示 + 生成ボタンの有効化 ────────────────────
+function updateVocalStartInfo() {
+  const vocalRoles = ['soprano', 'alto'];
+  const vocalTracks = tracks.filter((_, i) => vocalRoles.includes(trackRoles[i] || 'none'));
+
+  const vocalStartText = document.getElementById('vocal-start-text');
+  const vocalStartTime = document.getElementById('vocal-start-time');
+
+  // 生成ボタンの有効化判定
+  const hasVocalTracks = vocalTracks.length > 0;
+  const vocalStart = hasVocalTracks
+    ? Math.min(...vocalTracks.map(t => t.notes[0]?.time ?? Infinity))
+    : Infinity;
+  const isValid = hasVocalTracks && vocalStart !== Infinity;
+
+  generateBtn.disabled = !isValid;
+
+  if (!isValid) {
+    vocalStartText.style.display = 'none';
+    return;
+  }
+
+  vocalStartTime.textContent = vocalStart.toFixed(2);
+  vocalStartText.style.display = 'inline';
+}
+
+// ── トラック選択（互換性のため保持） ──────────────────────────────────────────
+function selectTrack(idx) {
+  selIdx = idx;
+  document.querySelectorAll('.track-card').forEach((c, i) => {
+    c.classList.toggle('selected', i === idx);
+  });
+  generateBtn.disabled = (tracks[idx].noteCount === 0);
+  outputSec.classList.add('hidden');
+  jsonObj = null;
+}
+
+// ── 外れ値カットオフ自動検出 ─────────────────────────────────────────────────
+// tracks のうち notes がある lastNoteEndTick の最大値が 2番目の値より15%超えていたら
+// 2番目の値 + 1拍バッファ をカットオフとして提案する
+function detectOutlierCutoff() {
+  if (!parser) return null;
+  const endTicks = parser.tracks
+    .filter(t => t.rawNotes.length > 0)
+    .map(t => t.lastNoteEndTick)
+    .sort((a, b) => b - a); // 降順
+
+  if (endTicks.length < 2) return null;
+  const max       = endTicks[0];
+  const secondMax = endTicks[1];
+  // max が 2番目より15%以上大きければ外れ値とみなす
+  return max > secondMax * 1.15 ? secondMax + parser.ticksPerBeat : null;
+}
+
+// ── pitchGuide 生成 ───────────────────────────────────────────────────────────
+generateBtn.addEventListener('click', () => {
+  // 声部トラック（ソプラノ・アルト）を取得
+  const vocalRoles = ['soprano', 'alto'];
+  const vocalEntries = tracks
+    .map((t, i) => ({ track: t, role: trackRoles[i], idx: i }))
+    .filter(e => vocalRoles.includes(e.role));
+
+  if (vocalEntries.length === 0) {
+    showError('ソプラノまたはアルトのトラックを割り当ててください');
+    return;
+  }
+
+  const rawCutoff = cutoffInput.value.trim();
+  const cutoffTick = rawCutoff !== '' ? parseInt(rawCutoff, 10) : null;
+
+  // シフト補正は使用しない（shiftSec = 0）→ 前奏が自動的に null として記録される
+  const shiftSec = 0;
+
+  // 声部同期が有効か確認
+  const vocalSyncCheckbox = document.getElementById('vocal-sync-checkbox');
+  const isVocalSyncEnabled = vocalSyncCheckbox.checked && vocalEntries.length > 1;
+
+  // 声部同期が有効な場合、最小開始時刻を計算
+  let minVocalStart = Infinity;
+  if (isVocalSyncEnabled) {
+    vocalEntries.forEach(({ track }) => {
+      if (track.notes.length > 0) {
+        minVocalStart = Math.min(minVocalStart, track.notes[0].time);
+      }
+    });
+  }
+
+  // 一括生成・ダウンロード
+  vocalEntries.forEach(({ track, role }) => {
+    // 声部同期が有効な場合、このトラックのシフト量を計算
+    let vocalShiftSec = 0;
+    if (isVocalSyncEnabled && minVocalStart !== Infinity && track.notes.length > 0) {
+      vocalShiftSec = track.notes[0].time - minVocalStart;
+    }
+
+    const guide = generatePitchGuide(track, cutoffTick, shiftSec + vocalShiftSec);
+    // part 名をロール名に基づいて設定
+    guide.part = (role === 'soprano') ? 'Soprano' : 'Alto';
+
+    // 即座にダウンロード
+    const blob = new Blob([JSON.stringify(guide, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${guide.part}.json`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+
+  // 一覧表示
+  jsonObj = vocalEntries.length === 1 ? generatePitchGuide(vocalEntries[0].track, cutoffTick, shiftSec) : null;
+  jsonPreview.textContent = `✅ ${vocalEntries.length} 個の JSON ファイルをダウンロードしました。`;
+  outputSec.classList.remove('hidden');
+  outputSec.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+});
+
+// ── JSON ダウンロード ─────────────────────────────────────────────────────────
+downloadBtn.addEventListener('click', () => {
+  if (!jsonObj) return;
+
+  const blob = new Blob([JSON.stringify(jsonObj, null, 2)], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+
+  // ファイル名: part 名を安全な文字列に変換
+  const safe = jsonObj.part.replace(/[\\/:*?"<>|]/g, '_');
+  a.href     = url;
+  a.download = `pitchGuide_${safe}.json`;
+  a.click();
+
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+});
+
+// ── ドラッグ&ドロップ / ファイル選択 ─────────────────────────────────────────
+dropArea.addEventListener('click', () => midiInput.click());
+
+dropArea.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropArea.classList.add('drag-over');
+});
+dropArea.addEventListener('dragleave', () => dropArea.classList.remove('drag-over'));
+dropArea.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropArea.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f) loadFile(f);
+});
+
+midiInput.addEventListener('change', (e) => {
+  const f = e.target.files[0];
+  if (f) loadFile(f);
+  // 同一ファイルを再選択できるようにリセット
+  midiInput.value = '';
+});
+</script>
+</body>
+</html>
