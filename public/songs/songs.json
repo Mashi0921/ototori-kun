@@ -1,4 +1,9 @@
 [
-  { "id": "song1", "title": "COSMOS", "folder": "song1" },
-  { "id": "song2", "title": "まだありません", "folder": "song2" }
+  { "id": "song1",     "title": "COSMOS",             "folder": "song1"     },
+  { "id": "hajimari",  "title": "はじまりの予感",     "folder": "hajimari"  },
+  { "id": "lalala",    "title": "ラララミュージック",  "folder": "lalala"    },
+  { "id": "michi",     "title": "未知という名の船に乗り", "folder": "michi"  },
+  { "id": "10sai",     "title": "10歳をむかえる日に", "folder": "10sai"     },
+  { "id": "shabadaba", "title": "Sha ba da ba",        "folder": "shabadaba" },
+  { "id": "tomorrow",  "title": "Tomorrow",            "folder": "Tomorrow"  }
 ]
