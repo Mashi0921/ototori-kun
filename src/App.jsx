@@ -536,7 +536,7 @@ export default function App() {
 
   // ── songs.json 取得（初回マウント時） ────────────────────────────────────
   useEffect(() => {
-    fetch('/songs/songs.json')
+    fetch(`${import.meta.env.BASE_URL}songs/songs.json`)
       .then(res => res.json())
       .then(data => {
         setSongs(data);
@@ -568,7 +568,7 @@ export default function App() {
     //   .sync()   → Transport をマスタークロックとして登録
     //   .start(0) → Transport 時刻 0 に再生開始をスケジュール
     TRACKS.forEach(({ id }) => {
-      const url = `/songs/${folder}/${id}.mp3`;
+      const url = `${import.meta.env.BASE_URL}songs/${folder}/${id}.mp3`;
       const player = new Tone.Player(url).toDestination();
       player.sync().start(0);
       players[id] = player;
@@ -578,8 +578,8 @@ export default function App() {
 
     // MIDI JSON をロード（Soprano / Alto）
     Promise.all([
-      fetch(`/songs/${folder}/Soprano.json`).then(r => r.json()),
-      fetch(`/songs/${folder}/Alto.json`).then(r => r.json()),
+      fetch(`${import.meta.env.BASE_URL}songs/${folder}/Soprano.json`).then(r => r.json()),
+      fetch(`${import.meta.env.BASE_URL}songs/${folder}/Alto.json`).then(r => r.json()),
     ])
       .then(([soprano, alto]) => {
         notesRef.current = {
